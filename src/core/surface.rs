@@ -3,20 +3,15 @@ use ash::khr::wayland_surface;
 use ash::khr::win32_surface;
 use ash::vk::{HINSTANCE, HWND};
 use ash::{vk, Entry, Instance};
-use winit::raw_window_handle::{
-    HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
-};
-use winit::window::Window;
+use winit::raw_window_handle::{RawDisplayHandle, RawWindowHandle, };
 
 pub unsafe fn create_surface(
     entry: &Entry,
     instance: &Instance,
-    window: &Window,
+    raw_display_handle: RawDisplayHandle,
+    raw_window_handle: RawWindowHandle,
 ) -> (surface::Instance, vk::SurfaceKHR) {
-    let display_handle = window.display_handle().unwrap();
-    let window_handle = window.window_handle().unwrap();
-
-    let surface = match (display_handle.as_raw(), window_handle.as_raw()) {
+    let surface = match (raw_display_handle, raw_window_handle) {
         (RawDisplayHandle::Windows(_), RawWindowHandle::Win32(window)) => {
             let create_info = vk::Win32SurfaceCreateInfoKHR::default()
                 .hinstance(window.hinstance.unwrap().get() as HINSTANCE)

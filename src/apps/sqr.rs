@@ -7,6 +7,7 @@ use crate::core::pipeline::KewCmpPipeline;
 use crate::core::shader::{DescriptorSetLayoutBindingInfo, KewShader, ShaderStageConfig};
 use ash::vk;
 use std::ffi::CStr;
+use log::info;
 
 const SQR_SHADER_CONFIG: ShaderStageConfig<2> = unsafe {
     ShaderStageConfig {
@@ -81,5 +82,5 @@ pub fn sqr_compute(kew_device: &KewDevice, cmp_cmd_pool: &KewCommandPool, data: 
     unsafe {
         buffer_memory.rd_visible_mem(&mut result, buffer_b_size, dst_buffer.get_offset());
     }
-    log::info!("results: {:?}", result);
+    info!("results: {:?}", result);
 }

@@ -1,6 +1,6 @@
 use crate::core::device::KewDevice;
 use ash::vk;
-use log::debug;
+use log::{debug, warn};
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr;
@@ -48,7 +48,7 @@ impl<'a> KewMemory<'a> {
                 .expect("failed to map memory");
             self.mapped.set(mapped);
         } else {
-            log::warn!("map call on mapped memory (skipped call)")
+            warn!("map call on mapped memory (skipped call)")
         }
     }
 
@@ -60,7 +60,7 @@ impl<'a> KewMemory<'a> {
             }
             self.mapped.set(ptr::null_mut());
         } else {
-            log::warn!("unmap call on unmapped memory (skipped call)")
+            warn!("unmap call on unmapped memory (skipped call)")
         }
     }
 

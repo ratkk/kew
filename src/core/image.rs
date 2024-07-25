@@ -3,8 +3,9 @@ use crate::core::command::KewCommandPool;
 use crate::core::device::KewDevice;
 use crate::core::memory::{KewMemory, KewMemoryBinding};
 use ash::vk;
-use log::{debug, warn};
+use log;
 use std::ops::Deref;
+use log::{debug, warn};
 
 pub struct KewImage<'a> {
     kew_device: &'a KewDevice,
@@ -93,7 +94,7 @@ impl<'a> KewImage<'a> {
                     .expect("failed to bind memory")
             };
         } else {
-            log::warn!("image already bound to memory (skipped)")
+            warn!("image already bound to memory (skipped)")
         }
     }
 

@@ -1,10 +1,12 @@
-use std::sync::{mpsc::Sender, Arc};
+use ash::vk;
+use std::sync::{mpsc::Sender};
 
+use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
     event_loop::ActiveEventLoop,
-    window::{WindowAttributes, WindowId, Window},
+    window::{Window, WindowId},
 };
 
 use self::render::{start_render_thread, RenderUpdate};
@@ -13,16 +15,26 @@ mod render;
 
 #[derive(Default)]
 pub struct Dock {
-    window: Option<Arc<Window>>,
+    window: Option<Window>,
     render_thread: Option<Sender<RenderUpdate>>,
 }
 
 impl ApplicationHandler for Dock {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.render_thread.is_none() {
-            let attributes = WindowAttributes::default().with_title("kew");
-            let window = Arc::new(event_loop.create_window(attributes).unwrap());
-            self.render_thread = Some(start_render_thread(window.clone()));
+            let attributes = Window::default_attributes()
+                .with_title("Kew Dock")
+                .with_active(true);
+            let window = event_loop.create_window(attributes).unwrap();
+
+            let h_handle = window.display_handle().unwrap().as_raw();
+            let w_handle = window.window_handle().unwrap().as_raw();
+
+            self.render_thread = Some(start_render_thread(
+                h_handle,
+                w_handle,
+                get_window_extent(&window),
+            ));
             self.window = Some(window);
         }
     }
@@ -42,5 +54,13 @@ impl ApplicationHandler for Dock {
             }
             _ => (),
         }
+    }
+}
+
+fn get_window_extent(window: &Window) -> vk::Extent2D {
+    let inner_size = window.inner_size();
+    vk::Extent2D {
+        width: inner_size.width,
+        height: inner_size.height,
     }
 }

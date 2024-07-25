@@ -11,8 +11,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 mod apps;
 mod core;
-mod math;
 mod dock;
+mod math;
 
 fn main() {
     env_logger::init();

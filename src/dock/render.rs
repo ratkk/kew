@@ -1,11 +1,11 @@
 use std::ffi::CStr;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc};
 use std::{sync::mpsc::Sender, thread};
 
 use ash::khr::surface;
 use ash::vk;
-use log::debug;
-use winit::window::Window;
+use log::{debug, error, warn};
+use winit::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
 use crate::core::command::KewCommandPool;
 use crate::core::context::KewContext;
@@ -38,13 +38,24 @@ pub enum RenderUpdate {
     REDRAW,
 }
 
-pub fn start_render_thread(window: Arc<Window>) -> Sender<RenderUpdate> {
+pub fn start_render_thread(
+    raw_display_handle: RawDisplayHandle,
+    raw_window_handle: RawWindowHandle,
+    window_extent: vk::Extent2D,
+) -> Sender<RenderUpdate> {
     let (tx, rx) = mpsc::channel();
+
+    let kew_context = KewContext::new();
+    let (surface_loader, surface) = unsafe {
+        kew_surface::create_surface(
+            &kew_context.entry,
+            &kew_context.instance,
+            raw_display_handle,
+            raw_window_handle,
+        )
+    };
+
     thread::spawn(move || {
-        let kew_context = KewContext::new();
-        let (surface_loader, surface) = unsafe {
-            kew_surface::create_surface(&kew_context.entry, &kew_context.instance, &window)
-        };
         let mut queue_indices = KewQueueIndices::new(&kew_context);
         queue_indices.add_present_queue(&kew_context, &surface_loader, surface);
         let kew_device = KewDevice::new(kew_context, &queue_indices);
@@ -53,9 +64,9 @@ pub fn start_render_thread(window: Arc<Window>) -> Sender<RenderUpdate> {
         let frag_shader = KewShader::new(&kew_device, &FRAG_SHADER_CONFIG);
         let mut renderer = DockRenderer::new(
             &kew_device,
-            &window,
             &surface_loader,
             surface,
+            window_extent,
             queue_indices,
             &vert_shader,
             &frag_shader,
@@ -65,13 +76,13 @@ pub fn start_render_thread(window: Arc<Window>) -> Sender<RenderUpdate> {
             match rx.recv() {
                 Ok(update) => handle_render_update(&mut renderer, update),
                 Err(_) => {
-                    log::error!("render thread error mpsc message received (dropping thread)");
+                    error!("render thread error mpsc message received (dropping thread)");
                     unsafe {
                         drop(renderer);
                         surface_loader.destroy_surface(surface, None);
                     }
                     return;
-                },
+                }
             }
         }
     });
@@ -92,7 +103,6 @@ fn handle_render_update(renderer: &mut DockRenderer, update: RenderUpdate) {
             }
         }
     }
-
 }
 
 struct DockRenderer<'a> {
@@ -110,9 +120,9 @@ struct DockRenderer<'a> {
 impl<'a> DockRenderer<'a> {
     pub fn new(
         kew_device: &'a KewDevice,
-        window: &Window,
         surface_loader: &surface::Instance,
         surface: vk::SurfaceKHR,
+        window_extent: vk::Extent2D,
         queue_indices: KewQueueIndices,
         vert_shader: &KewShader,
         frag_shader: &KewShader,
@@ -123,12 +133,7 @@ impl<'a> DockRenderer<'a> {
         let gfx_cmd_buffers = gfx_cmd_pool
             .create_command_buffers(vk::CommandBufferLevel::PRIMARY, MAX_IN_FLIGHT_FRAMES as u32);
 
-        let swapchain = KewSwapchain::new(
-            &kew_device,
-            &surface_loader,
-            surface,
-            get_window_extent(&window),
-        );
+        let swapchain = KewSwapchain::new(&kew_device, &surface_loader, surface, window_extent);
         let gfx_pipeline = KewGfxPipeline::new(
             &kew_device,
             GfxPipelineConfig::default(),
@@ -168,7 +173,7 @@ impl<'a> DockRenderer<'a> {
             Err(_) => todo!(),
             Ok((idx, suboptimal)) => {
                 if suboptimal {
-                    log::warn!("swapchain suboptimal for surface (recreating swapchain)");
+                    warn!("swapchain suboptimal for surface (recreating swapchain)");
                     // TODO: recreate swapchain
                 }
                 self.frame_opened = true;
@@ -176,7 +181,7 @@ impl<'a> DockRenderer<'a> {
             }
         }
 
-        let cmd_buffer = self.gfx_cmd_buffers[self.current_frame_idx as usize];
+        let cmd_buffer = self.gfx_cmd_buffers[self.current_frame_idx];
         unsafe {
             self.kew_device
                 .begin_command_buffer(cmd_buffer, &vk::CommandBufferBeginInfo::default())
@@ -203,15 +208,15 @@ impl<'a> DockRenderer<'a> {
     }
 
     pub fn begin_render_pass(&self, cmd_buffer: vk::CommandBuffer) {
-        assert!(cmd_buffer == self.current_cmd_buffer());
+        assert_eq!(cmd_buffer, self.current_cmd_buffer());
         unsafe {
             self.swapchain
-                .begin_render_pass(cmd_buffer, self.current_image_idx as usize);
+                .begin_render_pass(cmd_buffer, self.current_image_idx);
         }
     }
 
     pub fn end_render_pass(&self, cmd_buffer: vk::CommandBuffer) {
-        assert!(cmd_buffer == self.current_cmd_buffer());
+        assert_eq!(cmd_buffer, self.current_cmd_buffer());
         unsafe {
             self.swapchain.end_render_pass(cmd_buffer);
         }
@@ -222,7 +227,7 @@ impl<'a> DockRenderer<'a> {
             self.frame_opened,
             "getting command buffer requires started frame"
         );
-        self.gfx_cmd_buffers[self.current_frame_idx as usize]
+        self.gfx_cmd_buffers[self.current_frame_idx]
     }
 
     unsafe fn draw(&self, cmd_buffer: vk::CommandBuffer) {
@@ -236,13 +241,5 @@ fn create_pipeline_layout(kew_device: &KewDevice) -> vk::PipelineLayout {
         kew_device
             .create_pipeline_layout(&pipeline_layout_info, None)
             .unwrap()
-    }
-}
-
-fn get_window_extent(window: &Window) -> vk::Extent2D {
-    let inner_size = window.inner_size();
-    vk::Extent2D {
-        width: inner_size.width,
-        height: inner_size.height,
     }
 }

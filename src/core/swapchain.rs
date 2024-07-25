@@ -3,7 +3,8 @@ use crate::core::device::KewDevice;
 use crate::core::{PREFERRED_SURFACE_COLORS, PREFERRED_SURFACE_FORMAT};
 use ash::khr::{surface, swapchain};
 use ash::vk;
-use log::debug;
+use log;
+use log::{debug, warn};
 
 pub const MAX_IN_FLIGHT_FRAMES: usize = 2;
 
@@ -62,7 +63,7 @@ impl<'a> KewSwapchain<'a> {
                 .map(|pm| *pm)
                 .find(|present_mode| *present_mode == vk::PresentModeKHR::IMMEDIATE)
                 .unwrap_or_else(|| {
-                    log::warn!("desired present mode unavailable (default FIFO)");
+                    warn!("desired present mode unavailable (default FIFO)");
                     vk::PresentModeKHR::FIFO
                 });
 
@@ -91,7 +92,7 @@ impl<'a> KewSwapchain<'a> {
                 swapchain,
                 surface_format.format,
                 render_pass,
-                );
+            );
 
             let mut image_available_semaphores: [vk::Semaphore; MAX_IN_FLIGHT_FRAMES] =
                 [vk::Semaphore::null(); MAX_IN_FLIGHT_FRAMES];
@@ -142,20 +143,15 @@ impl<'a> KewSwapchain<'a> {
                 extent: self.swapchain_extent,
             })
             .clear_values(&clear_vals);
-        self.kew_device.cmd_begin_render_pass(
-            cmd_buffer,
-            &begin_info,
-            vk::SubpassContents::INLINE,
-        );
+        self.kew_device
+            .cmd_begin_render_pass(cmd_buffer, &begin_info, vk::SubpassContents::INLINE);
 
         let viewport = vk::Viewport::default()
             .width(self.swapchain_extent.width as f32)
             .height(self.swapchain_extent.height as f32);
         let scissor = vk::Rect2D::default().extent(self.swapchain_extent);
-        self.kew_device
-            .cmd_set_viewport(cmd_buffer, 0, &[viewport]);
-        self.kew_device
-            .cmd_set_scissor(cmd_buffer, 0, &[scissor]);
+        self.kew_device.cmd_set_viewport(cmd_buffer, 0, &[viewport]);
+        self.kew_device.cmd_set_scissor(cmd_buffer, 0, &[scissor]);
     }
 
     pub unsafe fn end_render_pass(&self, cmd_buffer: vk::CommandBuffer) {
@@ -303,10 +299,10 @@ impl<'a> KewSwapchain<'a> {
                     && surface_format.color_space == PREFERRED_SURFACE_COLORS
             })
             .unwrap_or_else(|| {
-                log::warn!("did not find desired surface format (defaulting to first enumerated)");
+                warn!("did not find desired surface format (defaulting to first enumerated)");
                 formats.first().unwrap()
             });
-        log::debug!("surface format: {:?}", format);
+        debug!("surface format: {:?}", format);
         *format
     }
 

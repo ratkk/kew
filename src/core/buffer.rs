@@ -3,7 +3,7 @@ use crate::core::device::KewDevice;
 use crate::core::image::KewImage;
 use crate::core::memory::{KewMemory, KewMemoryBinding};
 use ash::vk;
-use log::debug;
+use log::{debug, warn};
 use std::ops::Deref;
 
 pub struct KewBuffer<'a> {
@@ -41,7 +41,7 @@ impl<'a> KewBuffer<'a> {
                     .expect("failed to bind memory")
             };
         } else {
-            log::warn!("buffer already bound to memory (skipped)")
+            warn!("buffer already bound to memory (skipped)")
         }
     }
 

@@ -189,10 +189,8 @@ impl<'a> KewGfxPipeline<'a> {
             blend_attachments.push(attachment);
         }
         debug!("loaded {} blend attachment(s)", blend_attachments.len());
-        let cbl =
-            vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
-        let dys =
-            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dstates);
+        let cbl = vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
+        let dys = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dstates);
 
         let create_info = vk::GraphicsPipelineCreateInfo::default()
             .layout(layout)
@@ -232,7 +230,8 @@ impl Drop for KewGfxPipeline<'_> {
         debug!("dropping KewGfxPipeline");
         unsafe {
             self.kew_device.destroy_pipeline(self.pipeline, None);
-            self.kew_device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.kew_device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
         }
     }
 }
