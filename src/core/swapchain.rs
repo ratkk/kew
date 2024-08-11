@@ -27,6 +27,7 @@ impl Drop for KewFrameBundle<'_> {
 
 pub struct KewSwapchain<'a> {
     kew_device: &'a KewDevice,
+    present_queue: vk::Queue,
     swapchain_loader: swapchain::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_extent: vk::Extent2D,
@@ -44,6 +45,7 @@ impl<'a> KewSwapchain<'a> {
         surface_loader: &surface::Instance,
         surface: vk::SurfaceKHR,
         window_extent: vk::Extent2D,
+        prs_queue_idx: u32,
     ) -> Self {
         unsafe {
             let surface_format =
@@ -66,6 +68,8 @@ impl<'a> KewSwapchain<'a> {
                     warn!("desired present mode unavailable (default FIFO)");
                     vk::PresentModeKHR::FIFO
                 });
+            let present_queue = kew_device.get_device_queue(prs_queue_idx, 0);
+
 
             let create_info = vk::SwapchainCreateInfoKHR::default()
                 .surface(surface)
@@ -116,6 +120,7 @@ impl<'a> KewSwapchain<'a> {
 
             Self {
                 kew_device,
+                present_queue,
                 swapchain_loader,
                 swapchain,
                 swapchain_extent,
@@ -164,7 +169,6 @@ impl<'a> KewSwapchain<'a> {
         image_idx: usize,
         frame_idx: usize,
         gfx_queue: &vk::Queue,
-        prs_queue: &vk::Queue,
     ) {
         let wait_semaphores = [self.image_available_semaphores[frame_idx]];
         let ping_semaphores = [self.render_finished_semaphores[frame_idx]];
@@ -195,11 +199,11 @@ impl<'a> KewSwapchain<'a> {
             .swapchains(&swapchains)
             .image_indices(&image_idxs);
         self.swapchain_loader
-            .queue_present(*prs_queue, &present_info)
+            .queue_present(self.present_queue, &present_info)
             .expect("failed to present swapchain image");
     }
 
-    pub unsafe fn is_frame_available(&self, frame_idx: usize) -> bool {
+    pub unsafe fn frame_in_use(&self, frame_idx: usize) -> bool {
         !self
             .kew_device
             .get_fence_status(self.frame_in_flight_fences[frame_idx])
@@ -280,7 +284,6 @@ impl<'a> KewSwapchain<'a> {
         let create_info = vk::RenderPassCreateInfo::default()
             .attachments(&attachments)
             .subpasses(&subpasses);
-
         kew_device.create_render_pass(&create_info, None).unwrap()
     }
 

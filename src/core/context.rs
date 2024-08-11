@@ -59,7 +59,7 @@ impl KewContext {
                         CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0")
                             .as_ptr(),
                     ];
-                info!("loading {} validation layer(s)", layer_names.len());
+                info!("loaded {} validation layer(s)", layer_names.len());
                 create_info = create_info.enabled_layer_names(&layer_names);
                 entry.create_instance(&create_info, None)
             } else {
@@ -79,7 +79,7 @@ impl KewContext {
         if cfg!(debug_assertions) {
             extensions.push(debug_utils::NAME.as_ptr());
         }
-        info!("loading {} instance extension(s)", extensions.len());
+        info!("loaded {} instance extension(s)", extensions.len());
         extensions
     }
 

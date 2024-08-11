@@ -1,6 +1,6 @@
+use std::thread;
 use ash::vk;
-use std::sync::{mpsc::Sender};
-
+use crossbeam::channel::{Sender, unbounded};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::{
     application::ApplicationHandler,
@@ -8,33 +8,60 @@ use winit::{
     event_loop::ActiveEventLoop,
     window::{Window, WindowId},
 };
+use crate::core::context::KewContext;
+use crate::core::device::{KewDevice, KewQueueIndices};
+use crate::dock::dock::init_dock;
 
-use self::render::{start_render_thread, RenderUpdate};
+mod config;
+mod dock;
 
-mod render;
+pub enum DockMessage {
+    TEST
+}
+
+pub enum DockErr {
+    SOFT
+}
 
 #[derive(Default)]
 pub struct Dock {
     window: Option<Window>,
-    render_thread: Option<Sender<RenderUpdate>>,
+    vk_thread: Option<Sender<DockMessage>>
 }
 
 impl ApplicationHandler for Dock {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.render_thread.is_none() {
+        if self.vk_thread.is_none() {
             let attributes = Window::default_attributes()
                 .with_title("Kew Dock")
                 .with_active(true);
             let window = event_loop.create_window(attributes).unwrap();
 
-            let h_handle = window.display_handle().unwrap().as_raw();
-            let w_handle = window.window_handle().unwrap().as_raw();
+            let kew_context = KewContext::new();
+            let (surface_loader, surface) = unsafe {
+                crate::core::surface::create_surface(
+                    &kew_context.entry,
+                    &kew_context.instance,
+                    window.display_handle().unwrap().as_raw(),
+                    window.window_handle().unwrap().as_raw(),
+                )
+            };
+            let window_extent = get_window_extent(&window);
+            let queue_indices = KewQueueIndices::new(&kew_context, &surface_loader, surface);
+            let kew_device = KewDevice::new(kew_context, &queue_indices);
 
-            self.render_thread = Some(start_render_thread(
-                h_handle,
-                w_handle,
-                get_window_extent(&window),
-            ));
+            let (tx, rx) = unbounded();
+            thread::spawn(move || {
+                init_dock(
+                    &kew_device,
+                    &surface_loader,
+                    surface,
+                    &queue_indices,
+                    window_extent,
+                    rx
+                );
+            });
+            self.vk_thread = Some(tx);
             self.window = Some(window);
         }
     }
@@ -48,8 +75,8 @@ impl ApplicationHandler for Dock {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                if let Some(sender) = &self.render_thread {
-                    sender.send(RenderUpdate::REDRAW).unwrap();
+                if let Some(sender) = &self.vk_thread {
+                    sender.send(DockMessage::TEST).unwrap();
                 }
             }
             _ => (),

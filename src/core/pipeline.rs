@@ -1,5 +1,6 @@
 use crate::core::command::KewCommandPool;
 use crate::core::device::KewDevice;
+use crate::core::model::VertexType;
 use crate::core::shader::KewShader;
 use ash::vk;
 use log::debug;
@@ -48,28 +49,20 @@ impl<'a> KewCmpPipeline<'a> {
         }
     }
 
-    pub fn get_bound_cmd_buffer(
-        &self,
-        command_pool: &KewCommandPool,
-        descriptor_set: vk::DescriptorSet,
-    ) -> vk::CommandBuffer {
-        let command_buffer = command_pool.get_command_buffer();
-        unsafe {
-            self.kew_device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                self.pipeline,
-            );
-            self.kew_device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::COMPUTE,
-                self.layout,
-                0,
-                &[descriptor_set],
-                &[],
-            )
-        }
-        command_buffer
+    pub unsafe fn bind(&self, descriptor_set: vk::DescriptorSet, cmd_buffer: vk::CommandBuffer) {
+        self.kew_device.cmd_bind_pipeline(
+            cmd_buffer,
+            vk::PipelineBindPoint::COMPUTE,
+            self.pipeline,
+        );
+        self.kew_device.cmd_bind_descriptor_sets(
+            cmd_buffer,
+            vk::PipelineBindPoint::COMPUTE,
+            self.layout,
+            0,
+            &[descriptor_set],
+            &[],
+        )
     }
 }
 
@@ -84,51 +77,32 @@ impl Drop for KewCmpPipeline<'_> {
 }
 
 pub struct BlendInfo {
-    src_factor: vk::BlendFactor,
-    dst_factor: vk::BlendFactor,
-    operation: vk::BlendOp,
+    pub src_factor: vk::BlendFactor,
+    pub dst_factor: vk::BlendFactor,
+    pub operation: vk::BlendOp,
 }
 
 pub struct ColorTarget {
-    color_blend: Option<BlendInfo>,
-    alpha_blend: Option<BlendInfo>,
-    write_mask: vk::ColorComponentFlags,
+    pub color_blend: Option<BlendInfo>,
+    pub alpha_blend: Option<BlendInfo>,
+    pub write_mask: vk::ColorComponentFlags,
 }
 
 pub struct PrimitiveState {
-    topology: vk::PrimitiveTopology,
-    restart: bool,
-    polygon_mode: vk::PolygonMode,
-    depth_clamp: bool,
-    cull_mode: vk::CullModeFlags,
-    front_face: vk::FrontFace,
+    pub topology: vk::PrimitiveTopology,
+    pub restart: bool,
+    pub polygon_mode: vk::PolygonMode,
+    pub depth_clamp: bool,
+    pub cull_mode: vk::CullModeFlags,
+    pub front_face: vk::FrontFace,
 }
 
-pub struct GfxPipelineConfig<const N: usize> {
-    primitive: PrimitiveState,
-    color_targets: [ColorTarget; N],
+pub struct GfxPipelineConfig {
+    pub primitive: PrimitiveState,
+    pub color_targets: &'static [ColorTarget],
     // multisample
     // depth stencil
-}
-
-impl Default for GfxPipelineConfig<1> {
-    fn default() -> Self {
-        GfxPipelineConfig {
-            primitive: PrimitiveState {
-                topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-                restart: false,
-                polygon_mode: vk::PolygonMode::FILL,
-                depth_clamp: false,
-                cull_mode: vk::CullModeFlags::NONE,
-                front_face: vk::FrontFace::CLOCKWISE,
-            },
-            color_targets: [ColorTarget {
-                color_blend: None,
-                alpha_blend: None,
-                write_mask: vk::ColorComponentFlags::RGBA,
-            }],
-        }
-    }
+    pub vertex_type: VertexType,
 }
 
 pub struct KewGfxPipeline<'a> {
@@ -138,9 +112,9 @@ pub struct KewGfxPipeline<'a> {
 }
 
 impl<'a> KewGfxPipeline<'a> {
-    pub fn new<const N: usize>(
+    pub fn new(
         kew_device: &'a KewDevice,
-        config: GfxPipelineConfig<N>,
+        config: &GfxPipelineConfig,
         layout: vk::PipelineLayout,
         vert_shader: &KewShader,
         frag_shader: &KewShader,
@@ -149,7 +123,14 @@ impl<'a> KewGfxPipeline<'a> {
         let pstages = [vert_shader.shader_stage_info, frag_shader.shader_stage_info];
         let dstates = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
 
-        let vin = vk::PipelineVertexInputStateCreateInfo::default();
+        let mut vin = vk::PipelineVertexInputStateCreateInfo::default();
+        if let Some(bd) = config.vertex_type.bind_descriptions() {
+            vin = vin.vertex_binding_descriptions(bd);
+        }
+        if let Some(ad) = config.vertex_type.attr_descriptions() {
+            vin = vin.vertex_attribute_descriptions(ad);
+        }
+
         let ina = vk::PipelineInputAssemblyStateCreateInfo::default()
             .topology(config.primitive.topology)
             .primitive_restart_enable(config.primitive.restart);
@@ -173,13 +154,13 @@ impl<'a> KewGfxPipeline<'a> {
                 .color_write_mask(target.write_mask);
             if target.color_blend.is_some() || target.alpha_blend.is_some() {
                 attachment = attachment.blend_enable(true);
-                if let Some(blend_info) = target.color_blend {
+                if let Some(blend_info) = &target.color_blend {
                     attachment = attachment
                         .src_color_blend_factor(blend_info.src_factor)
                         .dst_color_blend_factor(blend_info.dst_factor)
                         .color_blend_op(blend_info.operation);
                 }
-                if let Some(blend_info) = target.alpha_blend {
+                if let Some(blend_info) = &target.alpha_blend {
                     attachment = attachment
                         .src_alpha_blend_factor(blend_info.src_factor)
                         .dst_alpha_blend_factor(blend_info.dst_factor)

@@ -45,8 +45,7 @@ impl<'a> KewBuffer<'a> {
         }
     }
 
-    pub fn copy_to_image(&self, image: &KewImage, command_pool: &KewCommandPool) {
-        let command_buffer = command_pool.get_command_buffer();
+    pub fn copy_to_image(&self, image: &KewImage, cmd_buffer: vk::CommandBuffer) {
         let subresource_info = vk::ImageSubresourceLayers::default()
             .aspect_mask(image.subresource.aspect_mask)
             .mip_level(image.subresource.base_mip_level)
@@ -62,15 +61,12 @@ impl<'a> KewBuffer<'a> {
             .image_extent(image.extent);
         unsafe {
             self.kew_device.cmd_copy_buffer_to_image(
-                command_buffer,
+                cmd_buffer,
                 self.vk_buffer,
                 **image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 std::slice::from_ref(&copy_region),
             );
-            command_pool
-                .submit_command_buffers(&[command_buffer])
-                .unwrap();
         }
     }
 

@@ -11,7 +11,7 @@ pub struct KewDevice {
 }
 
 impl KewDevice {
-    pub fn new(context: KewContext, queue_indices: &KewQueueIndices) -> Rc<Self> {
+    pub fn new(context: KewContext, queue_indices: &KewQueueIndices) -> Self {
         let queue_create_infos = queue_indices.get_queue_create_infos();
         let device_features = vk::PhysicalDeviceFeatures::default();
         let extension_names = [swapchain::NAME.as_ptr()];
@@ -26,7 +26,7 @@ impl KewDevice {
                 .create_device(context.physical, &create_info, None)
                 .unwrap_or_else(|e| panic!("failed to create logical device: {}", e))
         };
-        Rc::new(Self { context, vk_device })
+        Self { context, vk_device }
     }
 
     pub fn find_memory_type(
@@ -67,12 +67,16 @@ pub struct KewQueueIndices {
     pub gfx_idx: u32,
     pub cmp_idx: u32,
     pub tfr_idx: u32,
-    pub prs_idx: Option<u32>,
+    pub prs_idx: u32,
 }
 
 impl KewQueueIndices {
     // TODO: add heuristics
-    pub fn new(context: &KewContext) -> Self {
+    pub fn new(
+        context: &KewContext,
+        surface_loader: &surface::Instance,
+        surface: vk::SurfaceKHR,
+    ) -> Self {
         let queue_families = unsafe {
             context
                 .instance
@@ -81,6 +85,7 @@ impl KewQueueIndices {
         let mut gfx_idx: (Option<u32>, bool) = (None, false);
         let mut cmp_idx: (Option<u32>, bool) = (None, false);
         let mut tfr_idx: (Option<u32>, bool) = (None, false);
+        let mut prs_idx: Option<u32> = None;
 
         for (idx, qfp) in queue_families.iter().enumerate() {
             let idx = idx as u32;
@@ -92,6 +97,14 @@ impl KewQueueIndices {
             }
             if tfr_idx.0.is_none() && qfp.queue_flags.contains(vk::QueueFlags::TRANSFER) {
                 tfr_idx.0 = Some(idx);
+            }
+            let present_support = unsafe {
+                surface_loader
+                    .get_physical_device_surface_support(context.physical, idx, surface)
+                    .unwrap()
+            };
+            if prs_idx.is_none() && present_support {
+                prs_idx = Some(idx);
             }
 
             // prefer non-graphics compute queue
@@ -118,45 +131,14 @@ impl KewQueueIndices {
                 continue;
             }
         }
-        match (gfx_idx.0, cmp_idx.0, tfr_idx.0) {
-            (Some(gfx), Some(cmp), Some(tfr)) => Self {
+        match (gfx_idx.0, cmp_idx.0, tfr_idx.0, prs_idx) {
+            (Some(gfx), Some(cmp), Some(tfr), Some(prs)) => Self {
                 gfx_idx: gfx,
                 cmp_idx: cmp,
                 tfr_idx: tfr,
-                prs_idx: None,
+                prs_idx: prs,
             },
             _ => panic!("failed to find required queue families"),
-        }
-    }
-
-    // TODO: add heuristics
-    pub fn add_present_queue(
-        &mut self,
-        context: &KewContext,
-        surface_loader: &surface::Instance,
-        surface: vk::SurfaceKHR,
-    ) {
-        let queue_families = unsafe {
-            context
-                .instance
-                .get_physical_device_queue_family_properties(context.physical)
-        };
-        let mut present_idx: (Option<u32>, bool) = (None, false);
-        for (idx, _) in queue_families.iter().enumerate() {
-            let idx = idx as u32;
-            let present_support = unsafe {
-                surface_loader
-                    .get_physical_device_surface_support(context.physical, idx, surface)
-                    .unwrap()
-            };
-            if present_idx.0.is_none() && present_support {
-                present_idx.0 = Some(idx);
-            }
-        }
-        if present_idx.0.is_some() {
-            self.prs_idx = present_idx.0;
-        } else {
-            panic!("no present support found");
         }
     }
 

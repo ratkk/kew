@@ -14,6 +14,7 @@ pub struct KewMemory<'a> {
     pub kew_device: &'a KewDevice,
     pub memory: vk::DeviceMemory,
     pub b_size: vk::DeviceSize,
+    pub m_type: u32,
     mapped: Cell<*mut c_void>,
 }
 
@@ -21,21 +22,17 @@ impl<'a> KewMemory<'a> {
     pub fn new(
         kew_device: &'a KewDevice,
         b_size: u64,
-        memory_reqs: vk::MemoryRequirements,
-        memory_flag: vk::MemoryPropertyFlags,
+        memory_type: u32,
     ) -> Self {
         let info = vk::MemoryAllocateInfo::default()
             .allocation_size(b_size)
-            .memory_type_index(
-                kew_device
-                    .find_memory_type(&memory_reqs, memory_flag)
-                    .unwrap(),
-            );
+            .memory_type_index(memory_type);
         let memory = unsafe { kew_device.allocate_memory(&info, None).unwrap() };
         Self {
             kew_device,
             memory,
             mapped: Cell::new(ptr::null_mut()),
+            m_type: memory_type,
             b_size,
         }
     }
