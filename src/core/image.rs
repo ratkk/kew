@@ -1,5 +1,4 @@
 use crate::core::buffer::KewBuffer;
-use crate::core::command::KewCommandPool;
 use crate::core::device::KewDevice;
 use crate::core::memory::{KewMemory, KewMemoryBinding};
 use ash::vk;

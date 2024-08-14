@@ -2,13 +2,19 @@ use std::ffi::CStr;
 use ash::vk;
 use crate::core::model::VertexType;
 use crate::core::pipeline::{ColorTarget, GfxPipelineConfig, PrimitiveState};
-use crate::core::shader::ShaderStageConfig;
+use crate::core::shader::{DescriptorSetLayoutBindingInfo, ShaderStageConfig};
 
-pub const VERT_SHADER_CONFIG: ShaderStageConfig<0> = unsafe {
+pub const VERT_SHADER_CONFIG: ShaderStageConfig<1> = unsafe {
     ShaderStageConfig {
         entry_name: CStr::from_bytes_with_nul_unchecked(b"main\0"),
-        path: "./shader/kew.vert.spv",
-        bindings: [],
+        path: "./shader/compiled/kew.vert.spv",
+        bindings: [
+            DescriptorSetLayoutBindingInfo {
+                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: 1,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+            }
+        ],
         stage: vk::ShaderStageFlags::VERTEX,
         create_flags: vk::PipelineShaderStageCreateFlags::empty(),
     }
@@ -16,7 +22,7 @@ pub const VERT_SHADER_CONFIG: ShaderStageConfig<0> = unsafe {
 pub const FRAG_SHADER_CONFIG: ShaderStageConfig<0> = unsafe {
     ShaderStageConfig {
         entry_name: CStr::from_bytes_with_nul_unchecked(b"main\0"),
-        path: "./shader/kew.frag.spv",
+        path: "./shader/compiled/kew.frag.spv",
         bindings: [],
         stage: vk::ShaderStageFlags::FRAGMENT,
         create_flags: vk::PipelineShaderStageCreateFlags::empty(),

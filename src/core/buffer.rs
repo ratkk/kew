@@ -1,4 +1,3 @@
-use crate::core::command::KewCommandPool;
 use crate::core::device::KewDevice;
 use crate::core::image::KewImage;
 use crate::core::memory::{KewMemory, KewMemoryBinding};
@@ -9,7 +8,7 @@ use std::ops::Deref;
 pub struct KewBuffer<'a> {
     kew_device: &'a KewDevice,
     m_bind: Option<KewMemoryBinding<'a>>,
-    vk_buffer: vk::Buffer,
+    pub vk_buffer: vk::Buffer,
     pub b_size: vk::DeviceSize,
 }
 
@@ -70,11 +69,18 @@ impl<'a> KewBuffer<'a> {
         }
     }
 
-    pub fn get_offset(&self) -> u64 {
+    pub unsafe fn wr_visible_mem<T: Copy>(
+        &self,
+        data: &[T],
+        b_size: vk::DeviceSize,
+        offset: vk::DeviceSize,
+    ) {
         if let Some(binding) = &self.m_bind {
-            binding.offset
+            binding
+                .memory
+                .wr_visible_mem(data, b_size, binding.offset + offset);
         } else {
-            panic!("cannot return offset for unbound buffer")
+            panic!("buffer not bound on write")
         }
     }
 

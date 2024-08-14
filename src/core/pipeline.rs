@@ -1,4 +1,3 @@
-use crate::core::command::KewCommandPool;
 use crate::core::device::KewDevice;
 use crate::core::model::VertexType;
 use crate::core::shader::KewShader;
@@ -106,7 +105,7 @@ pub struct GfxPipelineConfig {
 }
 
 pub struct KewGfxPipeline<'a> {
-    kew_device: &'a KewDevice,
+    pub kew_device: &'a KewDevice,
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
 }
@@ -197,12 +196,27 @@ impl<'a> KewGfxPipeline<'a> {
         }
     }
 
-    pub unsafe fn bind(&self, cmd_buffer: vk::CommandBuffer) {
+    pub unsafe fn bind_pipeline(&self, cmd_buffer: vk::CommandBuffer) {
         self.kew_device.cmd_bind_pipeline(
             cmd_buffer,
             vk::PipelineBindPoint::GRAPHICS,
             self.pipeline,
         );
+    }
+
+    pub unsafe fn bind_descriptor_sets(
+        &self,
+        cmd_buffer: vk::CommandBuffer,
+        descriptor_sets: &[vk::DescriptorSet],
+    ) {
+        self.kew_device.cmd_bind_descriptor_sets(
+            cmd_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            self.pipeline_layout,
+            0,
+            descriptor_sets,
+            &[],
+        )
     }
 }
 

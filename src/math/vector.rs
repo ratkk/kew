@@ -1,5 +1,6 @@
 use super::number::Zero;
 
+#[derive(Clone, Copy)]
 pub struct Vector<T, const U: usize> {
     data: [T; U],
 }

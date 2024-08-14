@@ -1,5 +1,4 @@
 use crate::core::device::KewDevice;
-use ash::prelude::VkResult;
 use ash::vk;
 use ash::vk::CommandPool;
 use log::debug;

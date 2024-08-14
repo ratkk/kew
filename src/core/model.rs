@@ -1,16 +1,63 @@
 use crate::core::buffer::KewBuffer;
+use crate::core::device::KewDevice;
 use crate::math::vector::Vector;
 use ash::vk;
 use std::mem::size_of;
 
-pub struct KewModel<'a> {
-    buffer: KewBuffer<'a>,
-    index_offset: usize,
+pub struct KewModel {
+    pub vertex_offset: u32,
+    pub index_amount: u32,
+    pub index_offset: u32,
 }
 
-pub struct KewModelVertexData<T: KewVertex> {
-    vertices: Vec<T>,
-    indices: Option<Vec<[u32; 3]>>,
+impl KewModel {
+    pub unsafe fn bind(
+        &self,
+        kew_device: &KewDevice,
+        cmd_buffer: vk::CommandBuffer,
+        vrt_buffer: &KewBuffer,
+        idx_buffer: &KewBuffer,
+    ) {
+        let buffers = [vrt_buffer.vk_buffer];
+        let offsets = [self.vertex_offset as u64];
+        kew_device.cmd_bind_vertex_buffers(cmd_buffer, 0, &buffers, &offsets);
+        kew_device.cmd_bind_index_buffer(
+            cmd_buffer,
+            idx_buffer.vk_buffer,
+            self.index_offset as u64,
+            vk::IndexType::UINT32,
+        );
+    }
+
+    pub unsafe fn draw(&self, kew_device: &KewDevice, cmd_buffer: vk::CommandBuffer) {
+        kew_device.cmd_draw_indexed(cmd_buffer, self.index_amount, 1, 0, 0, 0);
+    }
+}
+
+pub struct KewModelVertexData<T: KewVertex + Clone + Copy> {
+    pub vertices: Vec<T>,
+    pub indices: Vec<u32>,
+}
+
+impl<T: KewVertex + Clone + Copy> KewModelVertexData<T> {
+    pub fn vertex_data_size(&self) -> u64 {
+        self.vertices.len() as u64 * T::vertex_size()
+    }
+
+    pub fn index_data_size(&self) -> u64 {
+        self.indices.len() as u64 * 4
+    }
+
+    pub unsafe fn write_to_memory(
+        &self,
+        vrt_buffer: &KewBuffer,
+        idx_buffer: &KewBuffer,
+        vrt_offset: u64,
+        idx_offset: u64,
+    ) {
+        vrt_buffer.wr_visible_mem(&self.vertices, self.vertex_data_size(), vrt_offset);
+        idx_buffer.wr_visible_mem(&self.indices, self.index_data_size(), idx_offset);
+    }
 }
 
 impl KewModelVertexData<FlatVertex> {
@@ -21,8 +68,10 @@ impl KewModelVertexData<FlatVertex> {
             FlatVertex::new([0.8, 0.8], [1.0, 0.0, 0.0]),
             FlatVertex::new([0.8, -0.8], [0.0, 0.0, 1.0]),
         ];
-        let indices = Some(vec![[1, 2, 3], [0, 1, 2]]);
-        Self { vertices, indices }
+        Self {
+            vertices,
+            indices: vec![0, 1, 2, 2, 1, 3],
+        }
     }
 }
 
@@ -49,8 +98,13 @@ impl VertexType {
     }
 }
 
-pub trait KewVertex {}
+pub trait KewVertex: Sized {
+    fn vertex_size() -> u64 {
+        size_of::<Self>() as u64
+    }
+}
 
+#[derive(Clone, Copy)]
 pub struct FlatVertex {
     pos: Vector<f32, 2>,
     col: Vector<f32, 3>,

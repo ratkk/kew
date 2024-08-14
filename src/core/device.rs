@@ -3,7 +3,6 @@ use ash::khr::{surface, swapchain};
 use ash::{vk, Device};
 use log::debug;
 use std::ops::Deref;
-use std::rc::Rc;
 
 pub struct KewDevice {
     pub context: KewContext,

@@ -1,39 +1,31 @@
 use crate::core::buffer::KewBuffer;
 use crate::core::command::KewCommandPool;
-use crate::core::context::KewContext;
+use crate::core::descriptor::{KewDescriptorPool, KewDescriptorPoolBuilder};
 use crate::core::device::{KewDevice, KewQueueIndices};
 use crate::core::memory::KewMemory;
-use crate::core::model::KewModelVertexData;
+use crate::core::model::{KewModel, KewModelVertexData};
 use crate::core::pipeline::KewGfxPipeline;
 use crate::core::shader::KewShader;
 use crate::core::swapchain::{KewSwapchain, MAX_IN_FLIGHT_FRAMES};
+use crate::dock::config::{FLAT_VERT_CONFIG, FRAG_SHADER_CONFIG, PIPELINE_CONFIGS, VERT_SHADER_CONFIG};
 use crate::dock::{DockErr, DockMessage};
 use ash::khr::surface;
 use ash::vk;
 use crossbeam::channel::Receiver;
 use log::{debug, error, warn};
-use std::mem::{size_of, size_of_val, MaybeUninit};
 use std::thread;
-use ash::vk::SurfaceKHR;
-use winit::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-use crate::dock::config::{FRAG_SHADER_CONFIG, NULL_VERT_CONFIG, PIPELINE_CONFIGS, VERT_SHADER_CONFIG};
 
-const STAGE_MEM_IDX: usize = 0;
-const MODEL_MEM_IDX: usize = 1;
-const STAGE_MEM_SIZE: u64 = 1024;
+const MODEL_MEM_IDX: usize = 0;
 const MODEL_MEM_SIZE: u64 = 1024;
 
 pub fn init_dock(
     kew_device: &KewDevice,
     surface_loader: &surface::Instance,
-    surface: SurfaceKHR,
+    surface: vk::SurfaceKHR,
     queue_indices: &KewQueueIndices,
     window_extent: vk::Extent2D,
     application_thread: Receiver<DockMessage>,
 ) {
-    let mut memory_allocations: [MaybeUninit<KewMemory>; 2] =
-        [const { MaybeUninit::uninit() }; 2];
-
     let mut renderer = DockRenderer::new(
         &kew_device,
         &surface_loader,
@@ -43,69 +35,102 @@ pub fn init_dock(
         queue_indices.gfx_idx,
     );
 
+    let mut memory_allocations: Vec<KewMemory> = Vec::with_capacity(8);
+
+    let (mut vrt_buffer, vrt_mem_type) = create_buffer(
+        kew_device,
+        vk::BufferUsageFlags::VERTEX_BUFFER,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        MODEL_MEM_SIZE
+    );
+    let (mut idx_buffer, idx_mem_type) = create_buffer(
+        kew_device,
+        vk::BufferUsageFlags::INDEX_BUFFER,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        MODEL_MEM_SIZE
+    );
+    assert_eq!(vrt_mem_type, idx_mem_type);
+    memory_allocations.push(KewMemory::new(
+        kew_device,
+        MODEL_MEM_SIZE * 2,
+        vrt_mem_type,
+    ));
+    unsafe {
+        memory_allocations
+            .get(MODEL_MEM_IDX)
+            .unwrap()
+            .map(vk::WHOLE_SIZE, 0);
+        vrt_buffer.bind_memory(&memory_allocations[MODEL_MEM_IDX], 0);
+        idx_buffer.bind_memory(&memory_allocations[MODEL_MEM_IDX], MODEL_MEM_SIZE);
+    }
+
     let vert_shader = KewShader::new(&kew_device, &VERT_SHADER_CONFIG);
     let frag_shader = KewShader::new(&kew_device, &FRAG_SHADER_CONFIG);
-    let dock_scene = DockScene::dummy(
-        &kew_device,
-        &vert_shader,
-        &frag_shader,
-        &renderer.swapchain.render_pass
-    );
 
-    memory_allocations[MODEL_MEM_IDX].write(KewMemory::new(&kew_device, MODEL_MEM_SIZE, 0));
     thread::scope(|scope| {
+        scope.spawn(|| {
+            let mut dock_scene = DockScene::dummy(
+                &kew_device,
+                &vrt_buffer,
+                &idx_buffer,
+                &vert_shader,
+                &frag_shader,
+                &renderer.swapchain.render_pass,
+            );
 
-        // let mut stage_buffer = KewBuffer::new(
-        //     &kew_device,
-        //     STAGE_MEM_SIZE,
-        //     vk::BufferUsageFlags::TRANSFER_SRC,
-        // );
-        // let stage_mem_type = kew_device
-        //     .find_memory_type(
-        //         &stage_buffer.get_memory_requirements(),
-        //         vk::MemoryPropertyFlags::HOST_COHERENT | vk::MemoryPropertyFlags::HOST_COHERENT
-        //     )
-        //     .unwrap();
-        // memory_allocations[STAGE_MEM_IDX] = KewMemory::new(
-        //     &kew_device,
-        //     stage_buffer.get_memory_requirements().size,
-        //     stage_mem_type
-        // );
-        // stage_buffer.bind_memory(&memory_allocations[STAGE_MEM_IDX], 0);
+            let model = load_model(&vrt_buffer, &idx_buffer);
+            dock_scene.add_model(model);
 
-        //load_model(&kew_device);
-
-        scope.spawn(|| loop {
-            if let Ok(_) = application_thread.recv() {
-                renderer.render_scene(&dock_scene);
-                //load_model(&kew_device);
-            } else {
-                error!("dock render thread error mpsc message received (dropping thread)");
-                unsafe {
-                    surface_loader.destroy_surface(surface, None);
-                    return;
+            loop {
+                if let Ok(_) = application_thread.recv() {
+                    renderer.render_scene(&dock_scene);
+                } else {
+                    error!("dock render thread error mpsc message received (dropping thread)");
+                    unsafe {
+                        surface_loader.destroy_surface(surface, None);
+                        return;
+                    }
                 }
             }
         });
     });
 }
 
-// returns buffer object with loaded memory
-fn load_model(kew_device: &KewDevice) {
-    let model_data = KewModelVertexData::square();
-    let mut object_buffer = KewBuffer::new(
+fn create_buffer(
+    kew_device: &KewDevice,
+    buffer_usage: vk::BufferUsageFlags,
+    memory_flags: vk::MemoryPropertyFlags,
+    b_size: u64,
+) -> (KewBuffer, u32) {
+    let buffer = KewBuffer::new(
         kew_device,
-        size_of_val(&model_data) as u64,
-        vk::BufferUsageFlags::STORAGE_BUFFER,
+        b_size,
+        buffer_usage,
     );
-
-    let object_mem_type = kew_device
+    let memory_type = kew_device
         .find_memory_type(
-            &object_buffer.get_memory_requirements(),
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            &buffer.get_memory_requirements(),
+            memory_flags,
         )
         .unwrap();
-    debug!("object memory type: {}", object_mem_type)
+    (buffer, memory_type)
+}
+
+fn load_model(vrt_buffer: &KewBuffer, idx_buffer: &KewBuffer) -> KewModel {
+    let model_data = KewModelVertexData::square();
+    unsafe {
+        model_data.write_to_memory(
+            vrt_buffer,
+            idx_buffer,
+            0,
+            0
+        );
+    }
+    KewModel {
+        vertex_offset: 0,
+        index_amount: model_data.indices.len() as u32,
+        index_offset: 0,
+    }
 }
 
 pub struct DockRenderer<'a> {
@@ -113,6 +138,7 @@ pub struct DockRenderer<'a> {
     swapchain: KewSwapchain<'a>,
     cmd_pool: KewCommandPool<'a>,
     cmd_buffers: [vk::CommandBuffer; MAX_IN_FLIGHT_FRAMES],
+    descriptor_pool: KewDescriptorPool<'a>,
     current_frame_idx: usize,
     current_image_idx: usize,
     frame_opened: bool,
@@ -138,12 +164,19 @@ impl<'a> DockRenderer<'a> {
             window_extent,
             prs_queue_idx,
         );
+        let descriptor_pool = KewDescriptorPoolBuilder::new(MAX_IN_FLIGHT_FRAMES as u32)
+            .add_pool_size(
+                vk::DescriptorType::UNIFORM_BUFFER,
+                MAX_IN_FLIGHT_FRAMES as u32,
+            )
+            .build(kew_device);
 
         Self {
             kew_device,
             swapchain,
             cmd_pool,
             cmd_buffers,
+            descriptor_pool,
             current_frame_idx: 0,
             current_image_idx: 0,
             frame_opened: false,
@@ -153,9 +186,9 @@ impl<'a> DockRenderer<'a> {
     pub fn render_scene(&mut self, scene: &DockScene) {
         unsafe {
             if let Ok(cmd_buffer) = self.open_frame() {
-                self.swapchain.begin_render_pass(cmd_buffer, self.current_image_idx);
-                scene.pipeline.bind(cmd_buffer);
-                self.kew_device.cmd_draw(cmd_buffer, 3, 1, 0, 0);
+                self.swapchain
+                    .begin_render_pass(cmd_buffer, self.current_image_idx);
+                scene.record_cmd_buffer(cmd_buffer);
                 self.swapchain.end_render_pass(cmd_buffer);
                 self.close_frame(cmd_buffer);
             }
@@ -202,27 +235,49 @@ impl<'a> DockRenderer<'a> {
 }
 
 pub struct DockScene<'a> {
+    vrt_buffer: &'a KewBuffer<'a>,
+    idx_buffer: &'a KewBuffer<'a>,
+    model_infos: Vec<KewModel>,
     pipeline: KewGfxPipeline<'a>,
+    //vert_dset_layout: vk::DescriptorSetLayout,
+    //frag_dset_layout: vk::DescriptorSetLayout,
 }
 
 impl<'a> DockScene<'a> {
     pub fn dummy(
         kew_device: &'a KewDevice,
+        vrt_buffer: &'a KewBuffer<'a>,
+        idx_buffer: &'a KewBuffer<'a>,
         vert_shader: &KewShader,
         frag_shader: &KewShader,
         render_pass: &vk::RenderPass,
     ) -> Self {
         let pipeline = KewGfxPipeline::new(
             kew_device,
-            &PIPELINE_CONFIGS[NULL_VERT_CONFIG],
+            &PIPELINE_CONFIGS[FLAT_VERT_CONFIG],
             Self::create_pipeline_layout(kew_device),
             vert_shader,
             frag_shader,
-            render_pass
+            render_pass,
         );
         Self {
-            pipeline
+            vrt_buffer,
+            idx_buffer,
+            model_infos: Vec::new(),
+            pipeline,
         }
+    }
+
+    pub unsafe fn record_cmd_buffer(&self, cmd_buffer: vk::CommandBuffer) {
+        self.pipeline.bind_pipeline(cmd_buffer);
+        for model in &self.model_infos {
+            model.bind(self.pipeline.kew_device, cmd_buffer, &self.vrt_buffer, &self.idx_buffer);
+            model.draw(self.pipeline.kew_device, cmd_buffer);
+        }
+    }
+
+    pub fn add_model(&mut self, model: KewModel) {
+        self.model_infos.push(model);
     }
 
     fn create_pipeline_layout(kew_device: &KewDevice) -> vk::PipelineLayout {
@@ -232,5 +287,11 @@ impl<'a> DockScene<'a> {
                 .create_pipeline_layout(&pipeline_layout_info, None)
                 .unwrap()
         }
+    }
+}
+
+impl Drop for DockScene<'_> {
+    fn drop(&mut self) {
+        debug!("HELLO")
     }
 }

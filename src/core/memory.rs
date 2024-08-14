@@ -1,9 +1,9 @@
 use crate::core::device::KewDevice;
 use ash::vk;
 use log::{debug, warn};
-use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 pub struct KewMemoryBinding<'a> {
     pub memory: &'a KewMemory<'a>,
@@ -15,7 +15,7 @@ pub struct KewMemory<'a> {
     pub memory: vk::DeviceMemory,
     pub b_size: vk::DeviceSize,
     pub m_type: u32,
-    mapped: Cell<*mut c_void>,
+    mapped: AtomicPtr<c_void>,
 }
 
 impl<'a> KewMemory<'a> {
@@ -31,19 +31,19 @@ impl<'a> KewMemory<'a> {
         Self {
             kew_device,
             memory,
-            mapped: Cell::new(ptr::null_mut()),
+            mapped: AtomicPtr::new(ptr::null_mut()),
             m_type: memory_type,
             b_size,
         }
     }
 
     pub unsafe fn map(&self, b_size: vk::DeviceSize, offset: vk::DeviceSize) {
-        if self.mapped.get().is_null() {
+        if self.mapped.load(Ordering::SeqCst).is_null() {
             let mapped = self
                 .kew_device
                 .map_memory(self.memory, offset, b_size, vk::MemoryMapFlags::empty())
                 .expect("failed to map memory");
-            self.mapped.set(mapped);
+            self.mapped.store(mapped, Ordering::SeqCst);
         } else {
             warn!("map call on mapped memory (skipped call)")
         }
@@ -51,11 +51,11 @@ impl<'a> KewMemory<'a> {
 
     #[allow(dead_code)]
     pub fn unmap(&self) {
-        if !self.mapped.get().is_null() {
+        if !self.mapped.load(Ordering::SeqCst).is_null() {
             unsafe {
                 self.kew_device.unmap_memory(self.memory);
             }
-            self.mapped.set(ptr::null_mut());
+            self.mapped.store(ptr::null_mut(), Ordering::SeqCst);
         } else {
             warn!("unmap call on unmapped memory (skipped call)")
         }
@@ -67,7 +67,7 @@ impl<'a> KewMemory<'a> {
         b_size: vk::DeviceSize,
         offset: vk::DeviceSize,
     ) {
-        let mapped = self.mapped.get();
+        let mapped = self.mapped.load(Ordering::SeqCst);
         assert!(!mapped.is_null());
         assert!(
             b_size + offset <= self.b_size,
@@ -89,7 +89,7 @@ impl<'a> KewMemory<'a> {
         b_size: vk::DeviceSize,
         offset: vk::DeviceSize,
     ) {
-        let mapped = self.mapped.get();
+        let mapped = self.mapped.load(Ordering::SeqCst);
         assert!(
             !mapped.is_null(),
             "attempted wr_visible_mem on unmapped memory"
